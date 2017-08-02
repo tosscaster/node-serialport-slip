@@ -1,15 +1,17 @@
 'use strict';
 
+// https://tools.ietf.org/html/rfc1055
+// A NONSTANDARD FOR TRANSMISSION OF IP DATAGRAMS OVER SERIAL LINES: SLIP
+
 /**
  * Dependencies
  */
 var SerialPort = require("serialport")
     , util = require('util')
-    , bt = require('buffertools')
     , SLIPMessage = require('./slip-message.js')
     , fs = require('fs')
     , defaultProtocolDefinition = JSON.parse(fs.readFileSync(__dirname + '/default-protocol-definition.json', {encoding: 'utf8'}))
-    , _ = require('underscore')
+    , _ = require('lodash')
 
 /**
  * @param {String} path           path to serial port
@@ -24,7 +26,7 @@ var SLIP = function (path, options, protocol) {
   protocol = _.defaults(protocol ? protocol : {}, defaultProtocolDefinition)
   SLIPMessage.applyProtocol(protocol)
   this.protocol_ = protocol
-  this.endByte_ = new Buffer([protocol.endByte])
+  this.endByte_ = new Buffer.from([protocol.endByte])
   // register on data handler
   this.on('data', function (data) {
     that.collectDataAndFireMessageEvent_(data)
@@ -32,6 +34,10 @@ var SLIP = function (path, options, protocol) {
 }
 
 util.inherits(SLIP, SerialPort)
+
+SLIP.prototype.sendFlush = function () {
+  this.write(this.endByte_);
+}
 
 /**
  * Sends message to device
@@ -66,41 +72,39 @@ SLIP.prototype.sendMessageAndDrain = function (buffer, callback) {
  * @param  {Buffer}   data
  */
 SLIP.prototype.collectDataAndFireMessageEvent_ = (function () {
-  var temporaryBuffer = new Buffer(256)
-      , writeCursor = 0
-      , emptyBuffer = new Buffer(256);
-
-  bt.clear(emptyBuffer);
+  var temporaryBuffer = new Buffer.allocUnsafe((1024 * 10))
+      , writeCursor = 0;
 
   return function (data) {
-    var endIndex = bt.indexOf(data, this.endByte_);
-    if (endIndex === -1) {
-      //chunk has no endByte, pushing it to temporary buffer
-      writeCursor += data.copy(temporaryBuffer, writeCursor);
-    } else {
-      if (endIndex > 0) {
-        //chunk has data before endByte
-        writeCursor += data.copy(temporaryBuffer, writeCursor, 0, endIndex);
+    do {
+      var endIndex = data.indexOf(this.endByte_);
+      if (endIndex === -1) {
+        // chunk has no endByte, pushing it to temporary buffer
+        writeCursor += data.copy(temporaryBuffer, writeCursor);
+        return; // while loop
+      } else {
+        if (endIndex > 0) {
+          //chunk has data before endByte
+          writeCursor += data.copy(temporaryBuffer, writeCursor, 0, endIndex);
+        }
+        if (writeCursor > 0) {
+          //copy data from temporary buffer to a new buffer and fire 'message'
+          var messageBuffer = new Buffer.allocUnsafe(writeCursor);
+          temporaryBuffer.copy(messageBuffer, 0, 0, writeCursor);
+          var msg = SLIPMessage.unescape(messageBuffer);
+          if (msg) {
+            this.emit('message', msg)
+          }
+        }
+        writeCursor = 0;
+        if ((data.length - 1) > endIndex) {
+          //if has data after endByte
+          data = data.slice((endIndex + 1), data.length);
+        } else {
+          return; // while loop
+        }
       }
-      //copy data from temporary buffer to a new buffer and fire 'message'
-      var messageBuffer = new Buffer(writeCursor);
-
-      // Don't send a message if the buffer is empty and all we received was an end byte
-      if (!bt.equals(temporaryBuffer, emptyBuffer) || writeCursor !== 0) {
-        temporaryBuffer.copy(messageBuffer, 0, 0, writeCursor);
-        this.emit('message', SLIPMessage.unescape(messageBuffer));
-
-      }
-
-      bt.clear(temporaryBuffer);
-
-      writeCursor = 0;
-
-      if (data.length - 2 > endIndex) {
-        //if has data after endByte
-        writeCursor += data.copy(temporaryBuffer, 0, endIndex + 1, data.length);
-      }
-    }
+    } while (true)
   }
 })()
 

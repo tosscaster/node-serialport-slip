@@ -3,8 +3,7 @@
 /**
  * dependencies
  */
-var bt = require('buffertools')
-    , _ = require('underscore')
+var _ = require('lodash')
 
 /**
  * SLIPMessage class
@@ -22,9 +21,18 @@ var SLIPMessage = function (buffer) {
 SLIPMessage.unescape = function (initialBuffer) {
   var unescapedBytes = [];
   for (var i = 0; i < initialBuffer.length; i++) {
-    initialBuffer[i] === this.protocol_.escapeByte ?
-        unescapedBytes.push(_.findWhere(SLIPMessage.protocol_.escapeRules,
-            {replacement: initialBuffer[++i]}).initialFragment) : unescapedBytes.push(initialBuffer[i]);
+    if (initialBuffer[i] === this.protocol_.escapeByte) {
+      var escapeRule = _.find(SLIPMessage.protocol_.escapeRules, {
+        replacement: initialBuffer[++i]
+      });
+      if (escapeRule) {
+        unescapedBytes.push(escapeRule.initialFragment);
+      } else {
+        return null;
+      }
+    } else {
+      unescapedBytes.push(initialBuffer[i]);
+    }
   }
 
   return new Buffer(unescapedBytes);
@@ -91,7 +99,7 @@ SLIPMessage.prototype.buildReplacementMap_ = function (buffer) {
         , searchCursor = 0
         , endOfBuffer = false;
     while (!endOfBuffer) {
-      var index = bt.indexOf(buffer, new Buffer([rule.initialFragment]), searchCursor);
+      var index = buffer.indexOf(new Buffer([rule.initialFragment]), searchCursor);
       if (index !== -1) {
         bytesToReplace.push({index: index, replaceTo: rule.replacement});
         searchCursor = index + 1;
