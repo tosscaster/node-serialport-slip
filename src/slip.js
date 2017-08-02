@@ -9,9 +9,22 @@
 var SerialPort = require("serialport")
     , util = require('util')
     , SLIPMessage = require('./slip-message.js')
-    , fs = require('fs')
-    , defaultProtocolDefinition = JSON.parse(fs.readFileSync(__dirname + '/default-protocol-definition.json', {encoding: 'utf8'}))
     , _ = require('lodash')
+    , defaultProtocolDefinition = {
+        messageMaxLength: 256,
+        endByte: 192,
+        escapeByte: 219,
+        escapeRules: [
+        {
+          initialFragment: 192,
+          replacement: 220
+        },
+        {
+          initialFragment: 219,
+          replacement: 221
+        }
+      ]
+    }
 
 /**
  * @param {String} path           path to serial port
